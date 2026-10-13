@@ -1,0 +1,26 @@
+# ---------- Python 环境 / 工具链 ----------
+.venv*/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.jupyter/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---------- 数据集（体积大，可重新获取）----------
+CIFAR10_Data/
+
+# ---------- 运行生成的大体积中间产物（可重新生成）----------
+work/cache/
+work/models/
+work/downloads/
+work/envcheck/
+work/logs/

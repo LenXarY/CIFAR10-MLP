@@ -14,15 +14,24 @@ ready to package.
 | `.venv314` | NumPy 2.4.6, SciPy 1.18.0, scikit-learn 1.9.0, joblib 1.5.3 |
 | Jupyter kernel | `aiaa3102` registered |
 | Data | `CIFAR10_Data/`, `validation_set_to_students/`, `Model_Evaluation.ipynb` all in place |
-| `train_models.ipynb` | Run All completed in 1.9 h, outputs retained (54 KB notebook) |
-| `model_seed{42,2026,3102}.joblib` | 46.1 MB each, all below the 100 MB limit |
-| Verification | the unmodified course `Model_Evaluation.ipynb` reports **0.6358 average** |
+| `train_models.ipynb` | Run All completed in 3.3 h, outputs retained |
+| `model_seed{42,2026,3102}.joblib` | 46.2 MB each, all below the 100 MB limit |
+| Verification | the unmodified course `Model_Evaluation.ipynb` reports **0.6668 average** |
 
-Per-seed validation accuracy over the three seeds: 0.6356 / 0.6366 / 0.6352.
+Per-seed validation accuracy: 0.6642 / 0.6678 / 0.6684.
 
-The recipe changed from the HOG-feature version in section 6: the feature block is now
-a two-layer learned filter bank (see the notebook write-up). Screening numbers and the
-rejected variants are logged in `work/lab_results.jsonl`.
+Two changes produced the whole gain over the earlier 0.6358 version:
+
+* **Test-time augmentation over a shift grid.** Every member is scored on 33 views
+  (identity, +/-1..4 pixel shifts in both axes, and the same 16 shifted views after a
+  horizontal flip). The views share one fitted head, so they add no model size at all.
+  +2.2 points, and by far the biggest single lever.
+* **A double-corruption component in the training mixture** (45,000 images carrying two
+  CIFAR-10-C corruptions at once). +1.0 point.
+
+Everything else tried was neutral or worse - wider MLPs, higher PCA, multi-scale or
+k-means filter banks, max pooling, channel mixing, learning-rate annealing. Screening
+numbers and the rejected variants are logged in `work/lab_results.jsonl`.
 
 **Still to do:** build the submission ZIP with the student's name and number
 (section 7) — `work/package.py "NAME, Givenname-STUDENTID"`.

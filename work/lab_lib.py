@@ -110,6 +110,40 @@ FEATURE_SPECS = {
         pcanet="pc4n16", pcanet_cells=4, colour="mean", cells=8,
         angles=8, sigmas=(1.2, 2.2), laplacians=(1.6, 3.0),
     ),
+    # scikit-learn k-means dictionary bank (no CNN anywhere)
+    "km_or": dict(
+        pcanet="km24", pcanet_cells=4, colour="mean", cells=8,
+        angles=8, sigmas=(1.2, 2.2), laplacians=(1.6, 3.0),
+    ),
+    # stage-1 bank + learned 1x1 channel mixing + rectification + pooling
+    "mix_or": dict(
+        mix=dict(store="mix16", cells1=8, cells2=4), colour="mean", cells=8,
+        angles=8, sigmas=(1.2, 2.2), laplacians=(1.6, 3.0),
+    ),
+    "mix32_or": dict(
+        mix=dict(store="mix32", cells1=8, cells2=4), colour="mean", cells=8,
+        angles=8, sigmas=(1.2, 2.2), laplacians=(1.6, 3.0),
+    ),
+    # one bank per patch scale, concatenated
+    "pcmulti_or": dict(
+        pcanet=["pc8p3", "pc8", "pc8p7"], pcanet_cells=4, colour="mean", cells=8,
+        angles=8, sigmas=(1.2, 2.2), laplacians=(1.6, 3.0),
+    ),
+    # per-cell colour mean and standard deviation
+    "pc_or_col2": dict(
+        pcanet="pc8", pcanet_cells=4, colour="mean+std", cells=8,
+        angles=8, sigmas=(1.2, 2.2), laplacians=(1.6, 3.0),
+    ),
+    # max-pooling instead of mean-pooling in the learned bank
+    "pc_or_max": dict(
+        pcanet="pc8", pcanet_cells=4, colour="mean", cells=8, pool="max",
+        angles=8, sigmas=(1.2, 2.2), laplacians=(1.6, 3.0),
+    ),
+    # two banks at the same patch scale but different seeds / data draws
+    "pc2x_or": dict(
+        pcanet=["pc8", "pc8b"], pcanet_cells=4, colour="mean", cells=8,
+        angles=8, sigmas=(1.2, 2.2), laplacians=(1.6, 3.0),
+    ),
 }
 
 
@@ -190,6 +224,15 @@ def colour_branch(cells, std=False):
 
 def build_features(cfg):
     """Raw uint8 (N, 32, 32, 3) -> pooled oriented-filter features."""
+    if cfg.get("mix"):
+        import mix_lib
+
+        spec = dict(cfg["mix"])
+        name = spec.pop("store")
+        filters = mix_lib.ensure(name)
+        return mix_lib.build_features(filters["kernels"], filters["mixing"],
+                                      colour_cells=cfg.get("cells", 8), **spec)
+
     cells = cfg.get("cells", 8)
     as_float32 = lambda: _ft(np.asarray, dtype=np.float32)  # noqa: E731
     outer = []
@@ -242,21 +285,26 @@ def build_features(cfg):
     if cfg.get("pcanet"):
         from pcanet_lib import build_branches, ensure_filters
 
-        filters = ensure_filters(cfg["pcanet"])
+        stores = cfg["pcanet"]
+        if isinstance(stores, str):
+            stores = [stores]
         pc = cfg.get("pcanet_cells", 4)
-        branches = build_branches(filters, pc, cfg.get("pcanet_l1_pool", True))
-        outer.append(
-            (
-                "pcanet",
-                Pipeline(
-                    [
-                        ("as_float32", as_float32()),
-                        ("gray", _ft(np.mean, axis=3)),
-                        ("maps", FeatureUnion(branches, n_jobs=1)),
-                    ]
-                ),
+        for si, store in enumerate(stores):
+            filters = ensure_filters(store)
+            branches = build_branches(filters, pc, cfg.get("pcanet_l1_pool", True),
+                                      cfg.get("pool", "mean"))
+            outer.append(
+                (
+                    f"pcanet{si}",
+                    Pipeline(
+                        [
+                            ("as_float32", as_float32()),
+                            ("gray", _ft(np.mean, axis=3)),
+                            ("maps", FeatureUnion(branches, n_jobs=1)),
+                        ]
+                    ),
+                )
             )
-        )
 
     if cfg.get("colour"):
         outer.append(
@@ -284,7 +332,11 @@ def feature_dim(cfg):
         from pcanet_lib import branches_dim, ensure_filters
 
         pc = cfg.get("pcanet_cells", 4)
-        dim += branches_dim(ensure_filters(cfg["pcanet"]), pc, cfg.get("pcanet_l1_pool", True))
+        stores = cfg["pcanet"]
+        if isinstance(stores, str):
+            stores = [stores]
+        for store in stores:
+            dim += branches_dim(ensure_filters(store), pc, cfg.get("pcanet_l1_pool", True))
     if cfg.get("colour"):
         dim += cells * cells * 3 * (2 if cfg["colour"] == "mean+std" else 1)
     return dim
@@ -370,6 +422,13 @@ def build_mixture(X, y, seed=42, sizes=None, aug=None):
     idx_13 = rng.choice(n_clean, sizes["corr13"], replace=False)
     idx_15 = rng.choice(n_clean, sizes["corr15"], replace=False)
     idx_2 = rng.choice(n_clean, sizes.get("shift2", 0), replace=False)
+    idx_35 = rng.choice(n_clean, sizes.get("corr35", 0), replace=False)
+    idx_ly = rng.choice(n_clean, sizes.get("corr_layered", 0), replace=False)
+    idx_ly15 = rng.choice(n_clean, sizes.get("corr_layered15", 0), replace=False)
+    idx_rot = rng.choice(n_clean, sizes.get("rot", 0), replace=False)
+    idx_cut = rng.choice(n_clean, sizes.get("cutout", 0), replace=False)
+    idx_jit = rng.choice(n_clean, sizes.get("jitter", 0), replace=False)
+    idx_blur = rng.choice(n_clean, sizes.get("blur", 0), replace=False)
 
     X_shift = random_flip_shift(X_pool[idx_s], rng)
     if aug.get("jitter"):
@@ -391,6 +450,30 @@ def build_mixture(X, y, seed=42, sizes=None, aug=None):
         "corr15": (corr15, y_pool[idx_15]),
         "shift2": (X_shift2, y_pool[idx_2]),
     }
+    if sizes.get("corr35", 0):
+        parts["corr35"] = (make_corrupted(X_pool[idx_35], rng, 3, 5), y_pool[idx_35])
+    if sizes.get("corr_layered", 0):
+        inner = make_corrupted(X_pool[idx_ly], rng, 1, 3)
+        parts["corr_layered"] = (make_corrupted(inner, rng, 1, 3), y_pool[idx_ly])
+    if sizes.get("corr_layered15", 0):
+        inner = make_corrupted(X_pool[idx_ly15], rng, 1, 5)
+        parts["corr_layered15"] = (make_corrupted(inner, rng, 1, 5), y_pool[idx_ly15])
+    if sizes.get("rot", 0):
+        parts["rot"] = (
+            corrupt_batch(X_pool[idx_rot], "rotate", 2, rng),
+            y_pool[idx_rot],
+        )
+    if sizes.get("cutout", 0):
+        parts["cutout"] = (cutout(random_flip_shift(X_pool[idx_cut], rng), rng, 8), y_pool[idx_cut])
+    if sizes.get("jitter", 0):
+        parts["jitter"] = (jitter(random_flip_shift(X_pool[idx_jit], rng), rng), y_pool[idx_jit])
+    if sizes.get("blur", 0):
+        base = X_pool[idx_blur]
+        half = len(base) // 2
+        out = np.empty_like(base)
+        out[:half] = corrupt_batch(base[:half], "gaussian_blur", 2, rng)
+        out[half:] = corrupt_batch(base[half:], "pixelate", 2, rng)
+        parts["blur"] = (out, y_pool[idx_blur])
     return parts
 
 

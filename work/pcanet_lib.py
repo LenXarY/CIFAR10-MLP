@@ -68,19 +68,48 @@ def pca_filters(patches, n_components):
     return vt[:n_components].reshape(n_components, side, side).astype(np.float32)
 
 
-def learn(X_train, n_l1=8, n_l2=8, patch=5, n_patch=120000, n_images=8000, seed=0):
-    """Return (l1_filters, [l2_filters of each l1 map])."""
+def kmeans_filters(patches, n_components, seed=0):
+    """Dictionary filters from scikit-learn k-means (Coates & Ng style).
+
+    Same role as `pca_filters`, but the atoms are cluster centroids rather than
+    principal directions; k-means atoms are usually better localised edge/blob
+    detectors and, unlike a convolution stack, this stays entirely inside
+    scikit-learn.
+    """
+    from sklearn.cluster import MiniBatchKMeans
+
+    km = MiniBatchKMeans(
+        n_clusters=n_components,
+        batch_size=4096,
+        n_init=3,
+        max_iter=200,
+        random_state=seed,
+    ).fit(patches)
+    side = int(round(np.sqrt(patches.shape[1])))
+    return km.cluster_centers_.reshape(n_components, side, side).astype(np.float32)
+
+
+def learn(X_train, n_l1=8, n_l2=8, patch=5, n_patch=120000, n_images=8000, seed=0,
+          method="pca"):
+    """Return (l1_filters, [l2_filters of each l1 map]).
+
+    `method="pca"` reproduces the original PCANet-lite bank; `method="kmeans"`
+    learns the same two-layer bank with scikit-learn's MiniBatchKMeans instead.
+    """
     rng = np.random.default_rng(seed)
     idx = np.sort(rng.choice(len(X_train), min(n_images, len(X_train)), replace=False))
     gray = X_train[idx].mean(3).astype(np.float32)
 
-    l1 = pca_filters(sample_patches(gray, patch, n_patch, rng), n_l1)
+    def make(atoms, k, s):
+        return kmeans_filters(atoms, k, seed=s) if method == "kmeans" else pca_filters(atoms, k)
+
+    l1 = make(sample_patches(gray, patch, n_patch, rng), n_l1, seed)
 
     l2 = []
     for k in range(n_l1):
         resp = ndimage.convolve(gray, l1[k], mode="reflect", axes=(1, 2))
         np.maximum(resp, 0, out=resp)
-        l2.append(pca_filters(sample_patches(resp, patch, n_patch, rng), n_l2))
+        l2.append(make(sample_patches(resp, patch, n_patch, rng), n_l2, seed + 1 + k))
     return l1, l2
 
 
@@ -110,35 +139,35 @@ def ensure_filters(name, cache_dir="work/cache"):
 
 
 # ------------------------------------------------------------- the transform
-def _pool(cells):
+def _pool(cells, mode="mean"):
     size = 32 // cells
     return Pipeline(
         [
             ("reshape", reshape((-1, cells, size, cells, size))),
-            ("pool", _ft(np.mean, axis=(2, 4))),
+            ("pool", _ft(np.max if mode == "max" else np.mean, axis=(2, 4))),
             ("flatten", reshape((-1, cells * cells))),
         ]
     )
 
 
-def _response(kernel, cells):
+def _response(kernel, cells, mode="mean"):
     return Pipeline(
         [
             ("convolve", _ft(ndimage.convolve, weights=kernel, mode="reflect", axes=(1, 2))),
             ("relu", _ft(np.clip, a_min=0.0, a_max=None)),
-            ("pool", _pool(cells)),
+            ("pool", _pool(cells, mode)),
         ]
     )
 
 
-def build_branches(filters, cells=4, l1_pool=True):
+def build_branches(filters, cells=4, l1_pool=True, mode="mean"):
     """Branches taking an (N, 32, 32) grayscale batch."""
     l1, l2 = filters
     branches = []
     for i, kernel in enumerate(l1):
-        head = [(f"l2_{j}", _response(k, cells)) for j, k in enumerate(l2[i])]
+        head = [(f"l2_{j}", _response(k, cells, mode)) for j, k in enumerate(l2[i])]
         if l1_pool:
-            head.append(("l1", _pool(cells)))
+            head.append(("l1", _pool(cells, mode)))
         branches.append(
             (
                 f"map{i}",

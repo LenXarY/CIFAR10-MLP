@@ -30,6 +30,9 @@ def main():
                     help="which mixture components to train on")
     ap.add_argument("--aug", default="",
                     help="comma list of extra augmentation levers: cutout8,jitter,double,sev_hi15=5")
+    ap.add_argument("--sizes", default=None,
+                    help="mixture sizes as key=value pairs, e.g. clean=16000,corr15=15000")
+    ap.add_argument("--cache-tag", default="")
     ap.add_argument("--pca", type=int, default=512)
     ap.add_argument("--hidden", default="768")
     ap.add_argument("--alpha", type=float, default=1e-4)
@@ -53,16 +56,31 @@ def main():
             aug["cutout"] = int(item[len("cutout"):] or 8)
         else:
             aug[item] = True
-    parts = build_mixture(X, y, aug=aug)
+    if args.sizes:
+        sizes = {}
+        for item in args.sizes.split(","):
+            k, v = item.split("=")
+            sizes[k.strip()] = int(v)
+        sizes.setdefault("clean", 16000)
+        sizes.setdefault("shift", 10000)
+        sizes.setdefault("shift2", 7000)
+        for k in ("corr13", "corr15", "corr35", "corr_layered", "corr_layered15",
+                  "rot", "cutout", "jitter", "blur"):
+            sizes.setdefault(k, 0)
+    else:
+        sizes = None
+    parts = build_mixture(X, y, aug=aug, sizes=sizes)
     cfg = FEATURE_SPECS[args.spec]
     print(f"[{tag}] feature dim {feature_dim(cfg)} | aug {aug}", flush=True)
 
     t1 = time.time()
-    variant = args.variant or (args.spec + ("__" + args.aug.replace(",", "_") if args.aug else ""))
+    variant = args.cache_tag or args.variant or (
+        args.spec + ("__" + args.aug.replace(",", "_") if args.aug else "")
+    )
     feats, F = features_for(cfg, parts, tag=variant)
     print(f"[{tag}] features in {time.time() - t1:.0f}s", flush=True)
 
-    keys = args.parts.split(",")
+    keys = [k for k in args.parts.split(",") if k in F]
     X_tr = np.concatenate([F[k] for k in keys])
     y_tr = np.concatenate([parts[k][1] for k in keys])
     del F

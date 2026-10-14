@@ -15,17 +15,17 @@ REPLACEMENTS = [
     ('"n_shift2": 20000,', '"n_shift2": 300,'),
     ('"n_corr13": 30000,', '"n_corr13": 600,'),
     ('"n_corr15": 30000,', '"n_corr15": 600,'),
+    ('"n_corr_layered": 45000,', '"n_corr_layered": 300,'),
     ('"pca": 768,', '"pca": 64,'),
     ('"hidden": (1024,),', '"hidden": (64,),'),
     ('"epochs": 55,', '"epochs": 3,'),
     ('"n_members": 3,', '"n_members": 2,'),
-    ('"prep_fit_rows": 70000,', '"prep_fit_rows": 3000,'),
-    ('"chunk": 5000,', '"chunk": 1500,'),
+    ('"prep_fit_rows": 60000,', '"prep_fit_rows": 3000,'),
+    ('"chunk": 20000,', '"chunk": 1500,'),
     ('n_patch=120000', 'n_patch=20000'),
     ('n_images=8000', 'n_images=2000'),
-    ('"model_seed42.joblib"', '"work/models/smoke_seed42.joblib"'),
-    ('"model_seed2026.joblib"', '"work/models/smoke_seed2026.joblib"'),
-    ('"model_seed3102.joblib"', '"work/models/smoke_seed3102.joblib"'),
+    ('MODEL_FILES = {seed: f"model_seed{seed}.joblib" for seed in RECIPE["seeds"]}',
+     'MODEL_FILES = {seed: f"work/models/smoke_seed{seed}.joblib" for seed in RECIPE["seeds"]}'),
 ]
 
 

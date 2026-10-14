@@ -54,6 +54,8 @@ def main():
                     help="hidden layer sizes for bagged members")
     ap.add_argument("--tta", action="store_true", help="add horizontal-flip twin members")
     ap.add_argument("--tag", default=None)
+    ap.add_argument("--sizes", default=None,
+                    help="mixture sizes as key=value pairs (defaults to lab_lib.MIXTURE)")
     args = ap.parse_args()
     tag = args.tag or args.spec
 
@@ -69,7 +71,18 @@ def main():
 
     t0 = time.time()
     X, y, X_val, y_val = load_raw()
-    parts = build_mixture(X, y, aug=aug)
+    if args.sizes:
+        sizes = {}
+        for item in args.sizes.split(","):
+            k, v = item.split("=")
+            sizes[k.strip()] = int(v)
+        for k in ("clean", "shift", "shift2", "corr13", "corr15", "corr35",
+                  "corr_layered", "corr_layered15"):
+            sizes.setdefault(k, 0)
+        sizes.setdefault("clean", 16000)
+    else:
+        sizes = None
+    parts = build_mixture(X, y, aug=aug, sizes=sizes)
     cfg = FEATURE_SPECS[args.spec]
     variant = args.variant or (args.spec + ("__" + args.aug.replace(",", "_") if args.aug else ""))
     feats, F = features_for(cfg, parts, tag=variant)
